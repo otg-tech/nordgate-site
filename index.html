@@ -82,6 +82,7 @@ section { padding-block: clamp(64px, 9vw, 112px); scroll-margin-top: 16px; }
   transition: transform .15s ease, background-color .15s ease;
 }
 .btn:hover { transform: translateY(-1px); }
+.btn:disabled { opacity: .6; cursor: progress; transform: none; }
 .btn-primary { background: var(--cta); color: var(--on-cta); }
 .btn-ghost { border-color: var(--on-band-muted); color: var(--on-band); background: transparent; }
 .btn-ghost:hover { background: var(--band-2); }
@@ -423,6 +424,7 @@ textarea { min-height: 96px; resize: vertical; }
           <label for="email">Work email</label>
           <input id="email" name="email" type="email" required autocomplete="email">
         </div>
+        <input type="checkbox" name="botcheck" tabindex="-1" autocomplete="off" aria-hidden="true" hidden>
         <details class="more">
           <summary>Add details (optional)</summary>
           <div class="more-grid">
@@ -447,7 +449,7 @@ textarea { min-height: 96px; resize: vertical; }
         <p class="consent">We use these details only to answer your request.</p>
         <details class="privacy">
           <summary>Privacy notice</summary>
-          <p>Nordgate Trading OÜ (registry code 11928248, Mere pst 4, 10111 Tallinn) processes the details you enter to prepare a quote and reply to you. We do not use them for marketing and delete them when they are no longer needed for the request or a resulting contract. To see, correct or delete your data, write to info@nordgate.eu.</p>
+          <p>Nordgate Trading OÜ (registry code 11928248, Mere pst 4, 10111 Tallinn) processes the details you enter to prepare a quote and reply to you. The form reaches us by email through the Web3Forms service. We do not use the details for marketing and delete them when they are no longer needed for the request or a resulting contract. To see, correct or delete your data, write to info@nordgate.eu.</p>
         </details>
       </form>
     </div>
@@ -468,8 +470,9 @@ textarea { min-height: 96px; resize: vertical; }
 
 <script>
 (function () {
-  // Set to the URL of your form service to start receiving requests.
-  var FORM_ENDPOINT = "";
+  // Requests are delivered by email through Web3Forms; the key only allows sending to the address it was issued for.
+  var FORM_ENDPOINT = "https://api.web3forms.com/submit";
+  var FORM_KEY = "d1c98e4e-61ce-4ee3-ac2f-72f4e1f5beec";
 
   // Narrow screens: widen the map's frame so edge labels (New York, Hong Kong) stay inside it.
   var mapSvg = document.getElementById('corridor-map');
@@ -572,7 +575,7 @@ textarea { min-height: 96px; resize: vertical; }
     'Add details (optional)': 'Lisa üksikasjad (valikuline)',
     'We use these details only to answer your request.': 'Kasutame neid andmeid ainult teie päringule vastamiseks.',
     'Privacy notice': 'Privaatsusteave',
-    'Nordgate Trading OÜ (registry code 11928248, Mere pst 4, 10111 Tallinn) processes the details you enter to prepare a quote and reply to you. We do not use them for marketing and delete them when they are no longer needed for the request or a resulting contract. To see, correct or delete your data, write to info@nordgate.eu.': 'Nordgate Trading OÜ (registrikood 11928248, Mere pst 4, 10111 Tallinn) töötleb sisestatud andmeid, et koostada hinnapakkumine ja teile vastata. Me ei kasuta neid turunduseks ning kustutame need, kui neid ei ole enam päringu või sellest tuleneva lepingu jaoks vaja. Oma andmete vaatamiseks, parandamiseks või kustutamiseks kirjutage aadressil info@nordgate.eu.',
+    'Nordgate Trading OÜ (registry code 11928248, Mere pst 4, 10111 Tallinn) processes the details you enter to prepare a quote and reply to you. The form reaches us by email through the Web3Forms service. We do not use the details for marketing and delete them when they are no longer needed for the request or a resulting contract. To see, correct or delete your data, write to info@nordgate.eu.': 'Nordgate Trading OÜ (registrikood 11928248, Mere pst 4, 10111 Tallinn) töötleb sisestatud andmeid, et koostada hinnapakkumine ja teile vastata. Vorm jõuab meieni e-postiga teenuse Web3Forms kaudu. Me ei kasuta andmeid turunduseks ning kustutame need, kui neid ei ole enam päringu või sellest tuleneva lepingu jaoks vaja. Oma andmete vaatamiseks, parandamiseks või kustutamiseks kirjutage aadressil info@nordgate.eu.',
     'Rate request': 'Hinnapäring',
     'Your email app should open with the request ready to send. If it does not, write to info@nordgate.eu.': 'Teie e-posti rakendus peaks avanema valmis päringuga. Kui seda ei juhtu, kirjutage aadressil info@nordgate.eu.',
     'Sending your request…': 'Päringu saatmine…',
@@ -628,32 +631,57 @@ textarea { min-height: 96px; resize: vertical; }
 
   var form = document.getElementById('rate-form');
   var status = document.getElementById('form-status');
+  var submitBtn = form.querySelector('button[type="submit"]');
+
+  function readForm() {
+    var d = new FormData(form);
+    return {
+      from: d.get('from') || '', to: d.get('to') || '', cargo: d.get('cargo') || '', ready: d.get('ready') || '',
+      name: d.get('name') || '', email: d.get('email') || '', notes: d.get('notes') || '', botcheck: d.get('botcheck')
+    };
+  }
+
+  // Fallback: hand the request to the visitor's email app, addressed to the company.
+  function openEmailApp(v) {
+    var rows = [
+      [t('Pick-up city or postcode'), v.from], [t('Delivery city or postcode'), v.to], [t('Cargo'), v.cargo],
+      [t('Ready date'), v.ready], [t('Your name'), v.name], [t('Work email'), v.email], [t('Anything else we should know'), v.notes]
+    ].filter(function (r) { return r[1]; }).map(function (r) { return r[0] + ': ' + r[1]; });
+    var subject = t('Rate request') + ': ' + v.from + ' → ' + v.to;
+    location.href = 'mailto:info@nordgate.eu?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(rows.join('\n'));
+    status.textContent = t('Your email app should open with the request ready to send. If it does not, write to info@nordgate.eu.');
+  }
+
   form.addEventListener('submit', function (e) {
     e.preventDefault();
-    if (!FORM_ENDPOINT) {
-      // No form service yet: hand the request to the visitor's email app, addressed to the company.
-      var d = new FormData(form);
-      var rows = [
-        [t('Pick-up city or postcode'), d.get('from')], [t('Delivery city or postcode'), d.get('to')],
-        [t('Cargo'), d.get('cargo')], [t('Ready date'), d.get('ready')], [t('Your name'), d.get('name')],
-        [t('Work email'), d.get('email')], [t('Anything else we should know'), d.get('notes')]
-      ].filter(function (r) { return r[1]; }).map(function (r) { return r[0] + ': ' + r[1]; });
-      var subject = t('Rate request') + ': ' + d.get('from') + ' → ' + d.get('to');
-      location.href = 'mailto:info@nordgate.eu?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(rows.join('\n'));
-      status.textContent = t('Your email app should open with the request ready to send. If it does not, write to info@nordgate.eu.');
-      return;
-    }
+    var v = readForm();
+    if (v.botcheck) return;
     status.textContent = t('Sending your request…');
+    submitBtn.disabled = true;
     fetch(FORM_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.fromEntries(new FormData(form)))
-    }).then(function (r) {
-      if (!r.ok) throw new Error(r.status);
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        access_key: FORM_KEY,
+        subject: 'Rate request: ' + v.from + ' → ' + v.to,
+        from_name: 'nordgate.eu',
+        email: v.email,
+        name: v.name || v.email,
+        'Pick-up': v.from,
+        'Delivery': v.to,
+        'Cargo': v.cargo,
+        'Ready date': v.ready || '—',
+        'Notes': v.notes || '—',
+        'Site language': lang.toUpperCase()
+      })
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (!res || !res.success) throw new Error(res && res.message);
       status.textContent = t('Request sent. We will reply to the email you entered.');
       form.reset();
     }).catch(function () {
-      status.textContent = t('Your request did not go through. Check your connection and try again.');
+      openEmailApp(v);
+    }).then(function () {
+      submitBtn.disabled = false;
     });
   });
 })();
